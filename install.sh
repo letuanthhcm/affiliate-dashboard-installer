@@ -59,6 +59,13 @@ if [ "$LEGACY_CONSUMER" = YES ]; then
   MIGRATION_ELIGIBLE=YES; COMPATIBILITY_REASON=ELIGIBLE_LEGACY_AFFILIATECMS
 fi
 
+current_sha="$(printf '%s' "$dep" | sed -n 's/.*#\([0-9a-fA-F]\{40\}\)$/\1/p')"
+if [ "$SUPPORTED_CONSUMER" = YES ] && [ "$current_sha" = "$PACKAGE_SHA" ] && [ -f "node_modules/$PACKAGE_NAME/package.json" ]; then
+  DIRTY_POLICY_RESULT=PASS; MIGRATION_RESULT=NOT_REQUIRED; INSTALLER_STATUS=PASS; FINAL_RESULT=ALREADY_INSTALLED; INSTALL_RESULT=ALREADY_INSTALLED; IDEMPOTENCY_TEST=PASS
+  PACKAGE_VERSION="$(node -p "require('./node_modules/$PACKAGE_NAME/package.json').version")"
+  summary; trap - EXIT; exit 0
+fi
+
 TARGETS="$TARGETS $LOCKFILE"
 while IFS= read -r line; do [ -n "$line" ] || continue; p="${line:3}"; p="${p%% -> *}"; protected=0; case "$p" in sitemaps/*|tmp/*) protected=1;; esac; [ "$protected" -eq 1 ] && continue; target=0; for t in $TARGETS; do [ "$p" = "$t" ] && target=1; done; if [ "$target" -eq 1 ]; then DIRTY_TARGET_PATHS="${DIRTY_TARGET_PATHS}${DIRTY_TARGET_PATHS:+,}$p"; else DIRTY_NON_TARGET_PATHS="${DIRTY_NON_TARGET_PATHS}${DIRTY_NON_TARGET_PATHS:+,}$p"; fi; done <<EOF
 $(git status --porcelain --untracked-files=all)
@@ -66,8 +73,6 @@ EOF
 [ -z "$DIRTY_TARGET_PATHS" ] || { DIRTY_POLICY_RESULT=FAIL; fail DIRTY_MIGRATION_TARGET; }
 DIRTY_POLICY_RESULT=PASS
 
-current_sha="$(printf '%s' "$dep" | sed -n 's/.*#\([0-9a-fA-F]\{40\}\)$/\1/p')"
-if [ "$SUPPORTED_CONSUMER" = YES ] && [ "$current_sha" = "$PACKAGE_SHA" ] && [ -f "node_modules/$PACKAGE_NAME/package.json" ]; then INSTALLER_STATUS=PASS; FINAL_RESULT=ALREADY_INSTALLED; INSTALL_RESULT=ALREADY_INSTALLED; IDEMPOTENCY_TEST=PASS; PACKAGE_VERSION="$(node -p "require('./node_modules/$PACKAGE_NAME/package.json').version")"; summary; trap - EXIT; exit 0; fi
 [ "$MODE" != verify-only ] || { INSTALLER_STATUS=PASS; FINAL_RESULT=$([ "$MIGRATION_REQUIRED" = YES ] && printf MIGRATION_REQUIRED || printf PACKAGE_UPDATE_REQUIRED); summary; trap - EXIT; exit 0; }
 if [ "$MODE" = dry-run ]; then INSTALLER_STATUS=PASS; FINAL_RESULT=DRY_RUN; MIGRATION_PLAN=$([ "$MIGRATION_REQUIRED" = YES ] && printf WOULD_MIGRATE_LEGACY || printf WOULD_UPDATE_PACKAGE); MIGRATION_RESULT=WOULD_APPLY; INSTALL_RESULT=WOULD_INSTALL; summary; trap - EXIT; exit 0; fi
 [ "$LEGACY_CONSUMER" != YES ] || [ "$MIGRATE_LEGACY" -eq 1 ] || fail LEGACY_MIGRATION_REQUIRES_FLAG
@@ -90,7 +95,8 @@ if [ "$RESTART_WEB" -eq 1 ]; then
   WEB_PM2_PROCESS="$selection"; CRON_PM2_PROCESSES="$(PM2_JSON="$before" node -e "const a=JSON.parse(process.env.PM2_JSON);process.stdout.write(a.filter(p=>/cron/i.test((p.name||'')+' '+((p.pm2_env||{}).pm_exec_path||''))).map(p=>p.name).join(','))")"
   cron_before="$(PM2_JSON="$before" node -e "const a=JSON.parse(process.env.PM2_JSON);process.stdout.write(a.filter(p=>/cron/i.test((p.name||'')+' '+((p.pm2_env||{}).pm_exec_path||''))).map(p=>p.name+':'+p.pm2_env.restart_time).sort().join(','))")"
   if [ -n "$HEALTH_URL" ]; then HEALTH_TARGET="$HEALTH_URL"; else HEALTH_TARGET="$(PM2_JSON="$before" NAME="$selection" node -e "const p=JSON.parse(process.env.PM2_JSON).find(x=>x.name===process.env.NAME);const v=p&&p.pm2_env&&((p.pm2_env.env||{}).PORT||p.pm2_env.PORT);if(v)process.stdout.write('http://127.0.0.1:'+v+'/')")"; fi
-  [ -n "$HEALTH_TARGET" ] || fail HEALTH_TARGET_UNDETERMINED
+  [ -n "$HEALTH_TARGET" ] || fail HEALTH_TARGET_UNRESOLVED
+  curl -fsS "$HEALTH_TARGET" >/dev/null || fail HEALTH_CHECK_FAILED
   pm2 restart "$selection" || fail WEB_RESTART_FAILED; WEB_RESTARTED=YES; after="$(pm2 jlist)"; cron_after="$(PM2_JSON="$after" node -e "const a=JSON.parse(process.env.PM2_JSON);process.stdout.write(a.filter(p=>/cron/i.test((p.name||'')+' '+((p.pm2_env||{}).pm_exec_path||''))).map(p=>p.name+':'+p.pm2_env.restart_time).sort().join(','))")"; [ "$cron_before" = "$cron_after" ] || fail CRON_RESTART_COUNT_CHANGED; curl -fsS "$HEALTH_TARGET" >/dev/null || fail HEALTH_CHECK_FAILED; HEALTH_CHECK=PASS
 fi
 MUTATED=0; INSTALLER_STATUS=PASS; FINAL_RESULT=PASS; IDEMPOTENCY_TEST=PASS; summary; trap - EXIT
