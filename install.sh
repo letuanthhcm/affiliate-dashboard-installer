@@ -7,7 +7,7 @@ APP_DIR="$(pwd -P)"; MODE=install; PACKAGE_SHA=''; MIGRATE_LEGACY=0; RESTART_WEB
 INSTALLER_STATUS=FAIL; FINAL_RESULT=FAIL; IS_GIT_WORKTREE=NO; GIT_TOPLEVEL=UNKNOWN; CONSUMER_SHA=UNKNOWN; CONSUMER_BRANCH=UNKNOWN
 PACKAGE_VERSION=UNKNOWN; PACKAGE_MANAGER=UNKNOWN; LOCKFILE=NONE; LOCKFILE_TRACKED=NO; LOCKFILE_VALIDATION=FAIL; PRECHECK=FAIL
 SUPPORTED_CONSUMER=NO; LEGACY_CONSUMER=NO; MIGRATION_REQUIRED=NO; MIGRATION_ELIGIBLE=NO; COMPATIBILITY_REASON=NOT_CHECKED
-DIRTY_TARGET_PATHS=''; DIRTY_NON_TARGET_PATHS=''; DIRTY_POLICY_RESULT=NOT_RUN; BACKUP_DIR=''; BACKUP_MANIFEST=''; ROLLBACK_AVAILABLE=NO; ROLLBACK_RESULT=NOT_RUN
+DIRTY_TARGET_PATHS=''; DIRTY_NON_TARGET_PATHS=''; DIRTY_POLICY_RESULT=NOT_RUN; BACKUP_DIR=''; BACKUP_MANIFEST=''; ROLLBACK_AVAILABLE=NO; ROLLBACK_RESULT=NOT_REQUIRED
 MIGRATION_PLAN=NOT_RUN; MIGRATION_RESULT=NOT_RUN; INSTALL_RESULT=NOT_RUN; PACKAGE_VERIFY=NOT_RUN; TARGETED_PACKAGE_TESTS=NOT_RUN; TARGETED_CONSUMER_TESTS=NOT_RUN
 PRODUCTION_LIKE_RENDER=NOT_RUN; NO_DUPLICATE_RENDER=NOT_RUN; IDEMPOTENCY_TEST=NOT_RUN; PROTECTED_PATHS='sitemaps,tmp'; PROTECTED_PATHS_PRESERVED=NOT_RUN
 WEB_PM2_PROCESS=NONE; WEB_RESTARTED=NO; CRON_PM2_PROCESSES=NONE; CRON_RESTARTED=NO; HEALTH_TARGET=NONE; HEALTH_CHECK=NOT_RUN; MUTATED=0
@@ -18,8 +18,20 @@ summary() { for key in INSTALLER_STATUS MODE APP_DIR IS_GIT_WORKTREE GIT_TOPLEVE
 rollback() {
   [ "$MUTATED" -eq 1 ] || return 0
   ROLLBACK_RESULT=PASS
-  while IFS='|' read -r state rel backup; do [ -n "$rel" ] || continue; if [ "$state" = PRESENT ]; then cp -p "$backup" "$APP_DIR/$rel" || ROLLBACK_RESULT=FAIL; else rm -f "$APP_DIR/$rel" || ROLLBACK_RESULT=FAIL; fi; done < "$BACKUP_MANIFEST"
-  if [ "$PACKAGE_MANAGER" = YARN ]; then yarn install --frozen-lockfile --ignore-scripts >/dev/null 2>&1 || ROLLBACK_RESULT=FAIL; else npm ci --ignore-scripts >/dev/null 2>&1 || ROLLBACK_RESULT=FAIL; fi
+  while IFS='|' read -r state rel backup checksum; do
+    [ -n "$rel" ] || continue
+    if [ "$state" = PRESENT ]; then mkdir -p "$(dirname "$APP_DIR/$rel")" && cp -p "$backup" "$APP_DIR/$rel" || ROLLBACK_RESULT=FAIL
+    else rm -f "$APP_DIR/$rel" || ROLLBACK_RESULT=FAIL
+    fi
+  done < "$BACKUP_MANIFEST"
+  if [ "$PACKAGE_MANAGER" = YARN ]; then yarn install --frozen-lockfile --ignore-scripts >/dev/null 2>&1 || true; else npm ci --ignore-scripts >/dev/null 2>&1 || true; fi
+  while IFS='|' read -r state rel backup checksum; do
+    [ -n "$rel" ] || continue
+    if [ "$state" = PRESENT ]; then [ -f "$APP_DIR/$rel" ] && [ "$(git hash-object --no-filters "$APP_DIR/$rel" 2>/dev/null)" = "$checksum" ] || ROLLBACK_RESULT=FAIL
+    else [ ! -e "$APP_DIR/$rel" ] || ROLLBACK_RESULT=FAIL
+    fi
+  done < "$BACKUP_MANIFEST"
+  git diff --quiet -- $TARGETS || ROLLBACK_RESULT=FAIL
   INSTALL_RESULT=ROLLED_BACK; MIGRATION_RESULT=ROLLED_BACK
 }
 fail() { FINAL_RESULT="$1"; rollback; summary; trap - EXIT; exit 1; }
@@ -54,8 +66,26 @@ if [ "$LEGACY_CONSUMER" = YES ]; then
   required='modules/app/helpers/setAppRoutes.js modules/dashboard/controllers/dashboard.admin.js themes/admin/dashboard/dashboard-admin.pug'
   for f in $required; do [ -e "$f" ] || { COMPATIBILITY_REASON="MISSING_ANCHOR:$f"; fail UNSUPPORTED_LEGACY_CONSUMER; }; done
   grep -Eq 'setAppRoutes[[:space:]]*\([[:space:]]*app[[:space:]]*\)' server.js || { COMPATIBILITY_REASON=SERVER_ROUTE_REGISTRATION_UNSUPPORTED; fail UNSUPPORTED_LEGACY_CONSUMER; }
-  grep -Eq 'module\.exports[[:space:]]*=' modules/app/helpers/setAppRoutes.js || { COMPATIBILITY_REASON=SET_APP_ROUTES_NOT_CALLABLE; fail UNSUPPORTED_LEGACY_CONSUMER; }
-  if grep -Eq '/api/google|google/overview' modules/app/helpers/setAppRoutes.js && ! grep -q registerAffiliateCmsDashboardIntegrations modules/app/helpers/setAppRoutes.js; then COMPATIBILITY_REASON=CONFLICTING_CUSTOM_GOOGLE_ROUTES; fail UNSUPPORTED_LEGACY_CONSUMER; fi
+  COMPATIBILITY_REASON="$(node <<'NODE'
+const fs = require('fs');
+const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+const routes = fs.readFileSync('modules/app/helpers/setAppRoutes.js', 'utf8');
+const dashboard = fs.readFileSync('modules/dashboard/controllers/dashboard.admin.js', 'utf8');
+const theme = fs.readFileSync('themes/admin/dashboard/dashboard-admin.pug', 'utf8');
+let reason = '';
+if (!pkg.scripts || typeof pkg.scripts.start !== 'string') reason = 'PACKAGE_SCRIPTS_NOT_DETERMINISTIC';
+else if (!/module\.exports\s*=\s*[A-Za-z_$][\w$]*/.test(routes)) reason = 'SET_APP_ROUTES_NOT_CALLABLE';
+else if (/registerAffiliateCmsDashboardIntegrations/.test(routes) && !routes.includes("require('@robus/affiliate-dashboard-integrations')")) reason = 'CONFLICTING_ANALYTICS_REGISTRATION';
+else if (/\/api\/google|google\/overview/.test(routes) && !/registerAffiliateCmsDashboardIntegrations/.test(routes)) reason = 'CONFLICTING_CUSTOM_GOOGLE_ROUTES';
+else if (!/^(?:const|let|var)\s+/m.test(routes)) reason = 'SET_APP_ROUTES_IMPORT_ANCHOR_UNSUPPORTED';
+else if (!/\n\s*\/\/\s*(catch files|load modules)/i.test(routes)) reason = 'SET_APP_ROUTES_REGISTRATION_ANCHOR_UNSUPPORTED';
+else if (!/^(?:const|let|var)\s+/m.test(dashboard)) reason = 'DASHBOARD_IMPORT_ANCHOR_UNSUPPORTED';
+else if (!/res\.render\(\s*(['"])admin\/dashboard\/dashboard-admin\1\s*,\s*locals\s*\)\s*;?/.test(dashboard)) reason = 'DASHBOARD_RENDER_CALL_UNSUPPORTED';
+else if (!/block\s+(content|body)|extends\s+/.test(theme)) reason = 'DASHBOARD_TEMPLATE_ANCHOR_UNSUPPORTED';
+if (reason) { process.stdout.write(reason); process.exitCode = 2; }
+else process.stdout.write('ELIGIBLE_LEGACY_AFFILIATECMS');
+NODE
+)" || { MIGRATION_ELIGIBLE=NO; fail UNSUPPORTED_LEGACY_CONSUMER; }
   MIGRATION_ELIGIBLE=YES; COMPATIBILITY_REASON=ELIGIBLE_LEGACY_AFFILIATECMS
 fi
 
@@ -77,9 +107,9 @@ DIRTY_POLICY_RESULT=PASS
 if [ "$MODE" = dry-run ]; then INSTALLER_STATUS=PASS; FINAL_RESULT=DRY_RUN; MIGRATION_PLAN=$([ "$MIGRATION_REQUIRED" = YES ] && printf WOULD_MIGRATE_LEGACY || printf WOULD_UPDATE_PACKAGE); MIGRATION_RESULT=WOULD_APPLY; INSTALL_RESULT=WOULD_INSTALL; summary; trap - EXIT; exit 0; fi
 [ "$LEGACY_CONSUMER" != YES ] || [ "$MIGRATE_LEGACY" -eq 1 ] || fail LEGACY_MIGRATION_REQUIRES_FLAG
 
-BACKUP_DIR="$GIT_TOPLEVEL/.git/affiliate-dashboard-integrations-backups/$(date +%Y%m%d%H%M%S)-$$"; mkdir -p "$BACKUP_DIR/files" || fail BACKUP_CREATE_FAILED
+BACKUP_DIR="$APP_DIR/.git/affiliate-dashboard-integrations-backups/$(date +%Y%m%d%H%M%S)-$$"; mkdir -p "$BACKUP_DIR/files" || fail BACKUP_CREATE_FAILED
 BACKUP_MANIFEST="$BACKUP_DIR/manifest"; : > "$BACKUP_MANIFEST" || fail BACKUP_CREATE_FAILED
-for f in $TARGETS; do if [ -f "$f" ]; then b="$BACKUP_DIR/files/$(printf '%s' "$f" | tr / _)"; cp -p "$f" "$b" || fail BACKUP_FAILED; printf 'PRESENT|%s|%s\n' "$f" "$b" >> "$BACKUP_MANIFEST"; else printf 'ABSENT|%s|\n' "$f" >> "$BACKUP_MANIFEST"; fi; done
+for f in $TARGETS; do if [ -f "$f" ]; then b="$BACKUP_DIR/files/$(printf '%s' "$f" | tr / _)"; cp -p "$f" "$b" || fail BACKUP_FAILED; checksum="$(git hash-object --no-filters "$b")" || fail BACKUP_FAILED; printf 'PRESENT|%s|%s|%s\n' "$f" "$b" "$checksum" >> "$BACKUP_MANIFEST"; else printf 'ABSENT|%s||\n' "$f" >> "$BACKUP_MANIFEST"; fi; done
 ROLLBACK_AVAILABLE=YES; MUTATED=1; spec="git+$PACKAGE_REPO#$PACKAGE_SHA"
 if [ "$PACKAGE_MANAGER" = YARN ]; then yarn add --exact --ignore-scripts "$PACKAGE_NAME@$spec" || fail LOCKFILE_RESOLUTION_FAILED; yarn install --frozen-lockfile || fail DETERMINISTIC_INSTALL_FAILED; else npm install --package-lock-only --save-exact "$PACKAGE_NAME@$spec" || fail LOCKFILE_RESOLUTION_FAILED; npm ci || fail DETERMINISTIC_INSTALL_FAILED; fi
 INSTALL_RESULT=PASS; PACKAGE_VERSION="$(node -p "require('./node_modules/$PACKAGE_NAME/package.json').version")"
