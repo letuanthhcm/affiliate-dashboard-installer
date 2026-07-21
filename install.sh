@@ -156,6 +156,7 @@ if [ -d "node_modules/$PACKAGE_NAME" ]; then NODE_MODULES_ORIGINAL_STATE=PRESENT
 ROLLBACK_AVAILABLE=YES; MUTATED=1; spec="git+$PACKAGE_REPO#$PACKAGE_SHA"
 if [ "$PACKAGE_MANAGER" = YARN ]; then yarn add --exact --ignore-scripts "$PACKAGE_NAME@$spec" || fail LOCKFILE_RESOLUTION_FAILED; yarn install --frozen-lockfile || fail DETERMINISTIC_INSTALL_FAILED; else npm install --package-lock-only --save-exact "$PACKAGE_NAME@$spec" || fail LOCKFILE_RESOLUTION_FAILED; npm ci || fail DETERMINISTIC_INSTALL_FAILED; fi
 INSTALL_RESULT=PASS; PACKAGE_VERSION="$(node -p "require('./node_modules/$PACKAGE_NAME/package.json').version")"; INSTALLED_PACKAGE_VERSION="$PACKAGE_VERSION"
+AFFILIATE_DASHBOARD_RELEASE_COMMIT="$PACKAGE_SHA" node "node_modules/$PACKAGE_NAME/scripts/generate-build-info.js" || fail PACKAGE_PROVENANCE_GENERATION_FAILED
 if [ "$LEGACY_CONSUMER" = YES ]; then out="$(PACKAGE_SHA="$PACKAGE_SHA" AFFILIATECMS_APP_DIR="$APP_DIR" node "node_modules/$PACKAGE_NAME/bin/migrate-affiliatecms-consumer.js")" || fail MIGRATION_APPLY_FAILED; MIGRATION_PLAN="$(printf '%s\n' "$out" | sed -n 's/^MIGRATION_PLAN=//p')"; MIGRATION_RESULT=PASS; fi
 node "node_modules/$PACKAGE_NAME/bin/verify.js" --expected-commit "$PACKAGE_SHA" || fail PACKAGE_VERIFY_FAILED; PACKAGE_VERIFY=PASS; INSTALLED_PACKAGE_COMMIT="$PACKAGE_SHA"
 node "node_modules/$PACKAGE_NAME/test/syntax-check.test.js" && node "node_modules/$PACKAGE_NAME/test/package-smoke.test.js" || fail TARGETED_PACKAGE_TESTS_FAILED; TARGETED_PACKAGE_TESTS=PASS
