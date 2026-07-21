@@ -6,7 +6,7 @@ const os = require('os');
 const path = require('path');
 
 const installer = fs.readFileSync(path.join(__dirname, '..', 'install.sh'), 'utf8');
-const match = installer.match(/\/\/ HEALTH_RESOLVER_NODE_BEGIN\n([\s\S]*?)\/\/ HEALTH_RESOLVER_NODE_END/);
+const match = installer.match(/\/\/ HEALTH_RESOLVER_NODE_BEGIN\r?\n([\s\S]*?)\/\/ HEALTH_RESOLVER_NODE_END/);
 assert.ok(match, 'embedded health resolver must be test-addressable');
 const resolver = match[1];
 

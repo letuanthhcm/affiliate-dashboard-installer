@@ -2,6 +2,7 @@
 set -euo pipefail
 INSTALLER="$(cd "$(dirname "$0")/.." && pwd -P)/install.sh"
 node "$(dirname "$0")/health-discovery.test.js"
+bash "$(dirname "$0")/health-readiness.test.sh"
 SHA=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 TEST_TMP_ROOT="$(mktemp -d -p "$(dirname "$INSTALLER")" installer-fixtures.XXXXXX)"
 trap 'rm -rf "$TEST_TMP_ROOT"' EXIT
