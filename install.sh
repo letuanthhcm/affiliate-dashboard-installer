@@ -7,31 +7,38 @@ APP_DIR="$(pwd -P)"; MODE=install; PACKAGE_SHA=''; MIGRATE_LEGACY=0; RESTART_WEB
 INSTALLER_STATUS=FAIL; FINAL_RESULT=FAIL; IS_GIT_WORKTREE=NO; GIT_TOPLEVEL=UNKNOWN; CONSUMER_SHA=UNKNOWN; CONSUMER_BRANCH=UNKNOWN
 PACKAGE_VERSION=UNKNOWN; PACKAGE_MANAGER=UNKNOWN; LOCKFILE=NONE; LOCKFILE_TRACKED=NO; LOCKFILE_VALIDATION=FAIL; PRECHECK=FAIL
 SUPPORTED_CONSUMER=NO; LEGACY_CONSUMER=NO; MIGRATION_REQUIRED=NO; MIGRATION_ELIGIBLE=NO; COMPATIBILITY_REASON=NOT_CHECKED
-DIRTY_TARGET_PATHS=''; DIRTY_NON_TARGET_PATHS=''; DIRTY_POLICY_RESULT=NOT_RUN; BACKUP_DIR=''; BACKUP_MANIFEST=''; ROLLBACK_AVAILABLE=NO; ROLLBACK_RESULT=NOT_REQUIRED
+LEGACY_STRATEGY=NONE; DIRTY_TARGET_PATHS=''; DIRTY_NON_TARGET_PATHS=''; DIRTY_POLICY_RESULT=NOT_RUN; BACKUP_DIR=''; BACKUP_MANIFEST=''; ROLLBACK_AVAILABLE=NO; ROLLBACK_RESULT=NOT_REQUIRED
+SOURCE_ROLLBACK_RESULT=NOT_REQUIRED; LOCKFILE_ROLLBACK_RESULT=NOT_REQUIRED; CREATED_FILES_ROLLBACK_RESULT=NOT_REQUIRED; NODE_MODULES_ROLLBACK_RESULT=NOT_REQUIRED; OVERALL_ROLLBACK_RESULT=NOT_REQUIRED; NODE_MODULES_ORIGINAL_STATE=UNKNOWN
 MIGRATION_PLAN=NOT_RUN; MIGRATION_RESULT=NOT_RUN; INSTALL_RESULT=NOT_RUN; PACKAGE_VERIFY=NOT_RUN; TARGETED_PACKAGE_TESTS=NOT_RUN; TARGETED_CONSUMER_TESTS=NOT_RUN
 PRODUCTION_LIKE_RENDER=NOT_RUN; NO_DUPLICATE_RENDER=NOT_RUN; IDEMPOTENCY_TEST=NOT_RUN; PROTECTED_PATHS='sitemaps,tmp'; PROTECTED_PATHS_PRESERVED=NOT_RUN
 WEB_PM2_PROCESS=NONE; WEB_RESTARTED=NO; CRON_PM2_PROCESSES=NONE; CRON_RESTARTED=NO; HEALTH_TARGET=NONE; HEALTH_CHECK=NOT_RUN; MUTATED=0
 TARGETS='package.json config/analytics-package.js modules/app/helpers/setAppRoutes.js modules/dashboard/controllers/dashboard.admin.js themes/admin/dashboard/dashboard-admin.pug'
 
 clean() { printf '%s' "$1" | tr '\r\n=' '___'; }
-summary() { for key in INSTALLER_STATUS MODE APP_DIR IS_GIT_WORKTREE GIT_TOPLEVEL CONSUMER_SHA CONSUMER_BRANCH PACKAGE_VERSION PACKAGE_SHA PACKAGE_MANAGER LOCKFILE LOCKFILE_TRACKED LOCKFILE_VALIDATION PRECHECK SUPPORTED_CONSUMER LEGACY_CONSUMER MIGRATION_REQUIRED MIGRATION_ELIGIBLE COMPATIBILITY_REASON DIRTY_TARGET_PATHS DIRTY_NON_TARGET_PATHS DIRTY_POLICY_RESULT BACKUP_DIR BACKUP_MANIFEST ROLLBACK_AVAILABLE ROLLBACK_RESULT MIGRATION_PLAN MIGRATION_RESULT INSTALL_RESULT PACKAGE_VERIFY TARGETED_PACKAGE_TESTS TARGETED_CONSUMER_TESTS PRODUCTION_LIKE_RENDER NO_DUPLICATE_RENDER IDEMPOTENCY_TEST PROTECTED_PATHS PROTECTED_PATHS_PRESERVED WEB_PM2_PROCESS WEB_RESTARTED CRON_PM2_PROCESSES CRON_RESTARTED HEALTH_TARGET HEALTH_CHECK FINAL_RESULT; do eval "v=\${$key}"; printf '%s=%s\n' "$key" "$(clean "$v")"; done; }
+summary() { for key in INSTALLER_STATUS MODE APP_DIR IS_GIT_WORKTREE GIT_TOPLEVEL CONSUMER_SHA CONSUMER_BRANCH PACKAGE_VERSION PACKAGE_SHA PACKAGE_MANAGER LOCKFILE LOCKFILE_TRACKED LOCKFILE_VALIDATION PRECHECK SUPPORTED_CONSUMER LEGACY_CONSUMER MIGRATION_REQUIRED MIGRATION_ELIGIBLE COMPATIBILITY_REASON LEGACY_STRATEGY DIRTY_TARGET_PATHS DIRTY_NON_TARGET_PATHS DIRTY_POLICY_RESULT BACKUP_DIR BACKUP_MANIFEST ROLLBACK_AVAILABLE ROLLBACK_RESULT SOURCE_ROLLBACK_RESULT LOCKFILE_ROLLBACK_RESULT CREATED_FILES_ROLLBACK_RESULT NODE_MODULES_ROLLBACK_RESULT OVERALL_ROLLBACK_RESULT NODE_MODULES_ORIGINAL_STATE MIGRATION_PLAN MIGRATION_RESULT INSTALL_RESULT PACKAGE_VERIFY TARGETED_PACKAGE_TESTS TARGETED_CONSUMER_TESTS PRODUCTION_LIKE_RENDER NO_DUPLICATE_RENDER IDEMPOTENCY_TEST PROTECTED_PATHS PROTECTED_PATHS_PRESERVED WEB_PM2_PROCESS WEB_RESTARTED CRON_PM2_PROCESSES CRON_RESTARTED HEALTH_TARGET HEALTH_CHECK FINAL_RESULT; do eval "v=\${$key}"; printf '%s=%s\n' "$key" "$(clean "$v")"; done; }
 rollback() {
   [ "$MUTATED" -eq 1 ] || return 0
-  ROLLBACK_RESULT=PASS
+  SOURCE_ROLLBACK_RESULT=PASS; LOCKFILE_ROLLBACK_RESULT=PASS; CREATED_FILES_ROLLBACK_RESULT=PASS; NODE_MODULES_ROLLBACK_RESULT=PASS
   while IFS='|' read -r state rel backup checksum; do
     [ -n "$rel" ] || continue
-    if [ "$state" = PRESENT ]; then mkdir -p "$(dirname "$APP_DIR/$rel")" && cp -p "$backup" "$APP_DIR/$rel" || ROLLBACK_RESULT=FAIL
-    else rm -f "$APP_DIR/$rel" || ROLLBACK_RESULT=FAIL
+    if [ "$state" = PRESENT ]; then mkdir -p "$(dirname "$APP_DIR/$rel")" && cp -p "$backup" "$APP_DIR/$rel" || { [ "$rel" = "$LOCKFILE" ] && LOCKFILE_ROLLBACK_RESULT=FAIL || SOURCE_ROLLBACK_RESULT=FAIL; }
+    else rm -f "$APP_DIR/$rel" || CREATED_FILES_ROLLBACK_RESULT=FAIL
     fi
   done < "$BACKUP_MANIFEST"
-  if [ "$PACKAGE_MANAGER" = YARN ]; then yarn install --frozen-lockfile --ignore-scripts >/dev/null 2>&1 || true; else npm ci --ignore-scripts >/dev/null 2>&1 || true; fi
+  rm -rf "$APP_DIR/node_modules/$PACKAGE_NAME" >/dev/null 2>&1 || NODE_MODULES_ROLLBACK_RESULT=FAIL
+  if [ "$NODE_MODULES_ORIGINAL_STATE" = PRESENT ]; then mkdir -p "$APP_DIR/node_modules/@robus" && cp -a "$BACKUP_DIR/node-module" "$APP_DIR/node_modules/$PACKAGE_NAME" || NODE_MODULES_ROLLBACK_RESULT=FAIL; fi
   while IFS='|' read -r state rel backup checksum; do
     [ -n "$rel" ] || continue
-    if [ "$state" = PRESENT ]; then [ -f "$APP_DIR/$rel" ] && [ "$(git hash-object --no-filters "$APP_DIR/$rel" 2>/dev/null)" = "$checksum" ] || ROLLBACK_RESULT=FAIL
-    else [ ! -e "$APP_DIR/$rel" ] || ROLLBACK_RESULT=FAIL
+    if [ "$state" = PRESENT ]; then
+      if ! { [ -f "$APP_DIR/$rel" ] && [ "$(git hash-object --no-filters "$APP_DIR/$rel" 2>/dev/null)" = "$checksum" ]; }; then [ "$rel" = "$LOCKFILE" ] && LOCKFILE_ROLLBACK_RESULT=FAIL || SOURCE_ROLLBACK_RESULT=FAIL; fi
+    else [ ! -e "$APP_DIR/$rel" ] || CREATED_FILES_ROLLBACK_RESULT=FAIL
     fi
   done < "$BACKUP_MANIFEST"
-  git diff --quiet -- $TARGETS || ROLLBACK_RESULT=FAIL
+  if [ "$NODE_MODULES_ORIGINAL_STATE" = PRESENT ]; then [ -f "$APP_DIR/node_modules/$PACKAGE_NAME/package.json" ] || NODE_MODULES_ROLLBACK_RESULT=FAIL; else [ ! -e "$APP_DIR/node_modules/$PACKAGE_NAME" ] || NODE_MODULES_ROLLBACK_RESULT=FAIL; fi
+  git diff --quiet -- $TARGETS || SOURCE_ROLLBACK_RESULT=FAIL
+  OVERALL_ROLLBACK_RESULT=PASS
+  for result in "$SOURCE_ROLLBACK_RESULT" "$LOCKFILE_ROLLBACK_RESULT" "$CREATED_FILES_ROLLBACK_RESULT" "$NODE_MODULES_ROLLBACK_RESULT"; do [ "$result" = PASS ] || OVERALL_ROLLBACK_RESULT=FAIL; done
+  ROLLBACK_RESULT="$OVERALL_ROLLBACK_RESULT"
   INSTALL_RESULT=ROLLED_BACK; MIGRATION_RESULT=ROLLED_BACK
 }
 fail() { FINAL_RESULT="$1"; rollback; summary; trap - EXIT; exit 1; }
@@ -80,13 +87,20 @@ else if (/\/api\/google|google\/overview/.test(routes) && !/registerAffiliateCms
 else if (!/^(?:const|let|var)\s+/m.test(routes)) reason = 'SET_APP_ROUTES_IMPORT_ANCHOR_UNSUPPORTED';
 else if (!/\n\s*\/\/\s*(catch files|load modules)/i.test(routes)) reason = 'SET_APP_ROUTES_REGISTRATION_ANCHOR_UNSUPPORTED';
 else if (!/^(?:const|let|var)\s+/m.test(dashboard)) reason = 'DASHBOARD_IMPORT_ANCHOR_UNSUPPORTED';
-else if (!/res\.render\(\s*(['"])admin\/dashboard\/dashboard-admin\1\s*,\s*locals\s*\)\s*;?/.test(dashboard)) reason = 'DASHBOARD_RENDER_CALL_UNSUPPORTED';
-else if (!/block\s+(content|body)|extends\s+/.test(theme)) reason = 'DASHBOARD_TEMPLATE_ANCHOR_UNSUPPORTED';
+else {
+  const homes = dashboard.match(/async\s+function\s+AdminHome\s*\([^)]*\)\s*\{[\s\S]*?\n\}/g) || [];
+  if (homes.length !== 1) reason = 'DASHBOARD_CONTROLLER_UNSUPPORTED';
+  else if ((homes[0].match(/return\s+res\.render\(\s*(['"])admin\/dashboard\/dashboard-admin\1\s*,\s*locals\s*\)\s*;?/g) || []).length !== 1) reason = 'DASHBOARD_RENDER_CALL_UNSUPPORTED';
+  else if (!/const\s*\{\s*locals\s*\}\s*=\s*res\s*;/.test(homes[0]) || !/Object\.assign\(\s*locals\s*,/.test(homes[0])) reason = 'DASHBOARD_LOCALS_UNSUPPORTED';
+  else if ((dashboard.match(/admin\/dashboard\/dashboard-admin/g) || []).length !== 1) reason = 'DASHBOARD_RENDER_AMBIGUOUS';
+  else if (!/^extends\s+\.\.\//m.test(theme) || (theme.match(/^block\s+content\s*$/gm) || []).length !== 1) reason = 'DASHBOARD_TEMPLATE_ANCHOR_UNSUPPORTED';
+  else if ((routes.match(/\/modules\/\*\*\/\*\.routes\.js/g) || []).length !== 1 || (routes.match(/\/\/\s*load modules/g) || []).length !== 1) reason = 'SET_APP_ROUTES_REGISTRATION_ANCHOR_UNSUPPORTED';
+}
 if (reason) { process.stdout.write(reason); process.exitCode = 2; }
 else process.stdout.write('ELIGIBLE_LEGACY_AFFILIATECMS');
 NODE
 )" || { MIGRATION_ELIGIBLE=NO; fail UNSUPPORTED_LEGACY_CONSUMER; }
-  MIGRATION_ELIGIBLE=YES; COMPATIBILITY_REASON=ELIGIBLE_LEGACY_AFFILIATECMS
+  MIGRATION_ELIGIBLE=YES; COMPATIBILITY_REASON=ELIGIBLE_LEGACY_AFFILIATECMS; LEGACY_STRATEGY=AFFILIATECMS_V223_DASHBOARD_RENDER
 fi
 
 current_sha="$(printf '%s' "$dep" | sed -n 's/.*#\([0-9a-fA-F]\{40\}\)$/\1/p')"
@@ -110,6 +124,7 @@ if [ "$MODE" = dry-run ]; then INSTALLER_STATUS=PASS; FINAL_RESULT=DRY_RUN; MIGR
 BACKUP_DIR="$APP_DIR/.git/affiliate-dashboard-integrations-backups/$(date +%Y%m%d%H%M%S)-$$"; mkdir -p "$BACKUP_DIR/files" || fail BACKUP_CREATE_FAILED
 BACKUP_MANIFEST="$BACKUP_DIR/manifest"; : > "$BACKUP_MANIFEST" || fail BACKUP_CREATE_FAILED
 for f in $TARGETS; do if [ -f "$f" ]; then b="$BACKUP_DIR/files/$(printf '%s' "$f" | tr / _)"; cp -p "$f" "$b" || fail BACKUP_FAILED; checksum="$(git hash-object --no-filters "$b")" || fail BACKUP_FAILED; printf 'PRESENT|%s|%s|%s\n' "$f" "$b" "$checksum" >> "$BACKUP_MANIFEST"; else printf 'ABSENT|%s||\n' "$f" >> "$BACKUP_MANIFEST"; fi; done
+if [ -d "node_modules/$PACKAGE_NAME" ]; then NODE_MODULES_ORIGINAL_STATE=PRESENT; cp -a "node_modules/$PACKAGE_NAME" "$BACKUP_DIR/node-module" || fail BACKUP_FAILED; else NODE_MODULES_ORIGINAL_STATE=ABSENT; fi
 ROLLBACK_AVAILABLE=YES; MUTATED=1; spec="git+$PACKAGE_REPO#$PACKAGE_SHA"
 if [ "$PACKAGE_MANAGER" = YARN ]; then yarn add --exact --ignore-scripts "$PACKAGE_NAME@$spec" || fail LOCKFILE_RESOLUTION_FAILED; yarn install --frozen-lockfile || fail DETERMINISTIC_INSTALL_FAILED; else npm install --package-lock-only --save-exact "$PACKAGE_NAME@$spec" || fail LOCKFILE_RESOLUTION_FAILED; npm ci || fail DETERMINISTIC_INSTALL_FAILED; fi
 INSTALL_RESULT=PASS; PACKAGE_VERSION="$(node -p "require('./node_modules/$PACKAGE_NAME/package.json').version")"
