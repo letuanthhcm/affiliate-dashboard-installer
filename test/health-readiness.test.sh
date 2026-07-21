@@ -37,7 +37,7 @@ run_case() {
   mkdir -p "$state"; make_bin "$bin"
   FIXTURE_STATE="$state" PM2_STATES="$states" PRIMARY_SEQUENCE="$primary" ROOT_SEQUENCE="$root" PATH="$bin:$PATH" POLLING_FILE="$TMP/polling.sh" HEALTH_TIMEOUT_SECONDS="$timeout" bash <<'RUN' 2>&1 || true
 set -u
-WEB_PM2_PROCESS=affiliatecms7; selection=affiliatecms7; health_port=8007; HEALTH_PRIMARY_TARGET=http://127.0.0.1:8007/health; HEALTH_FALLBACK_TARGET=http://127.0.0.1:8007/; HEALTH_TARGET=$HEALTH_PRIMARY_TARGET
+WEB_PM2_PROCESS=affiliatecms7; selection=affiliatecms7; health_port=8007; HEALTH_PRIMARY_TARGET=http://127.0.0.1:8007/health; HEALTH_ROOT_TARGET=http://127.0.0.1:8007/; HEALTH_FALLBACK_TARGET=NOT_REQUIRED; HEALTH_TARGET=$HEALTH_PRIMARY_TARGET
 before='[{"name":"affiliatecms7","pid":101,"pm2_env":{"status":"online","restart_time":5}},{"name":"affiliatecms7-cron","pid":303,"pm2_env":{"status":"online","restart_time":9,"pm_exec_path":"cronjobs.js"}}]'; cron_before='affiliatecms7-cron:9'
 WEB_RESTARTED=NO; WEB_PID_BEFORE=UNKNOWN; WEB_PID_AFTER=UNKNOWN; WEB_RESTART_COUNT_BEFORE=UNKNOWN; WEB_RESTART_COUNT_AFTER=UNKNOWN; PM2_ONLINE_RESULT=NOT_RUN
 CRON_RESTART_COUNT_AFTER=UNKNOWN; LISTENER_RESULT=NOT_RUN; LISTENER_ATTEMPTS=0; LISTENER_READY_AFTER_SECONDS=NOT_READY
