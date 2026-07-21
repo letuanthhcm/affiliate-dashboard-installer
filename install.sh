@@ -6,8 +6,9 @@ PACKAGE_REPO='https://github.com/letuanthhcm/affiliate-dashboard-integrations.gi
 APP_DIR="$(pwd -P)"; MODE=install; PACKAGE_SHA=''; MIGRATE_LEGACY=0; RESTART_WEB=0; PM2_APP=''; HEALTH_URL=''
 INSTALLER_STATUS=FAIL; FINAL_RESULT=FAIL; IS_GIT_WORKTREE=NO; GIT_TOPLEVEL=UNKNOWN; CONSUMER_SHA=UNKNOWN; CONSUMER_BRANCH=UNKNOWN
 PACKAGE_VERSION=UNKNOWN; PACKAGE_MANAGER=UNKNOWN; LOCKFILE=NONE; LOCKFILE_TRACKED=NO; LOCKFILE_VALIDATION=FAIL; PRECHECK=FAIL
+REQUESTED_PACKAGE_SHA=UNKNOWN; REQUESTED_PACKAGE_VERSION=UNKNOWN; PREEXISTING_NODE_MODULES_VERSION=ABSENT; INSTALLED_PACKAGE_VERSION=NOT_INSTALLED; INSTALLED_PACKAGE_COMMIT=NOT_INSTALLED
 SUPPORTED_CONSUMER=NO; LEGACY_CONSUMER=NO; MIGRATION_REQUIRED=NO; MIGRATION_ELIGIBLE=NO; COMPATIBILITY_REASON=NOT_CHECKED
-LEGACY_STRATEGY=NONE; DIRTY_TARGET_PATHS=''; DIRTY_NON_TARGET_PATHS=''; DIRTY_POLICY_RESULT=NOT_RUN; BACKUP_DIR=''; BACKUP_MANIFEST=''; ROLLBACK_AVAILABLE=NO; ROLLBACK_RESULT=NOT_REQUIRED
+LEGACY_STRATEGY=NONE; DASHBOARD_LOCALS_VARIANT=NONE; DIRTY_TARGET_PATHS=''; DIRTY_NON_TARGET_PATHS=''; DIRTY_POLICY_RESULT=NOT_RUN; BACKUP_DIR=''; BACKUP_MANIFEST=''; ROLLBACK_AVAILABLE=NO; ROLLBACK_RESULT=NOT_REQUIRED
 SOURCE_ROLLBACK_RESULT=NOT_REQUIRED; LOCKFILE_ROLLBACK_RESULT=NOT_REQUIRED; CREATED_FILES_ROLLBACK_RESULT=NOT_REQUIRED; NODE_MODULES_ROLLBACK_RESULT=NOT_REQUIRED; OVERALL_ROLLBACK_RESULT=NOT_REQUIRED; NODE_MODULES_ORIGINAL_STATE=UNKNOWN
 MIGRATION_PLAN=NOT_RUN; MIGRATION_RESULT=NOT_RUN; INSTALL_RESULT=NOT_RUN; PACKAGE_VERIFY=NOT_RUN; TARGETED_PACKAGE_TESTS=NOT_RUN; TARGETED_CONSUMER_TESTS=NOT_RUN
 PRODUCTION_LIKE_RENDER=NOT_RUN; NO_DUPLICATE_RENDER=NOT_RUN; IDEMPOTENCY_TEST=NOT_RUN; PROTECTED_PATHS='sitemaps,tmp'; PROTECTED_PATHS_PRESERVED=NOT_RUN
@@ -15,7 +16,7 @@ WEB_PM2_PROCESS=NONE; WEB_RESTARTED=NO; CRON_PM2_PROCESSES=NONE; CRON_RESTARTED=
 TARGETS='package.json config/analytics-package.js modules/app/helpers/setAppRoutes.js modules/dashboard/controllers/dashboard.admin.js themes/admin/dashboard/dashboard-admin.pug'
 
 clean() { printf '%s' "$1" | tr '\r\n=' '___'; }
-summary() { for key in INSTALLER_STATUS MODE APP_DIR IS_GIT_WORKTREE GIT_TOPLEVEL CONSUMER_SHA CONSUMER_BRANCH PACKAGE_VERSION PACKAGE_SHA PACKAGE_MANAGER LOCKFILE LOCKFILE_TRACKED LOCKFILE_VALIDATION PRECHECK SUPPORTED_CONSUMER LEGACY_CONSUMER MIGRATION_REQUIRED MIGRATION_ELIGIBLE COMPATIBILITY_REASON LEGACY_STRATEGY DIRTY_TARGET_PATHS DIRTY_NON_TARGET_PATHS DIRTY_POLICY_RESULT BACKUP_DIR BACKUP_MANIFEST ROLLBACK_AVAILABLE ROLLBACK_RESULT SOURCE_ROLLBACK_RESULT LOCKFILE_ROLLBACK_RESULT CREATED_FILES_ROLLBACK_RESULT NODE_MODULES_ROLLBACK_RESULT OVERALL_ROLLBACK_RESULT NODE_MODULES_ORIGINAL_STATE MIGRATION_PLAN MIGRATION_RESULT INSTALL_RESULT PACKAGE_VERIFY TARGETED_PACKAGE_TESTS TARGETED_CONSUMER_TESTS PRODUCTION_LIKE_RENDER NO_DUPLICATE_RENDER IDEMPOTENCY_TEST PROTECTED_PATHS PROTECTED_PATHS_PRESERVED WEB_PM2_PROCESS WEB_RESTARTED CRON_PM2_PROCESSES CRON_RESTARTED HEALTH_TARGET HEALTH_CHECK FINAL_RESULT; do eval "v=\${$key}"; printf '%s=%s\n' "$key" "$(clean "$v")"; done; }
+summary() { for key in INSTALLER_STATUS MODE APP_DIR IS_GIT_WORKTREE GIT_TOPLEVEL CONSUMER_SHA CONSUMER_BRANCH PACKAGE_VERSION PACKAGE_SHA REQUESTED_PACKAGE_SHA REQUESTED_PACKAGE_VERSION PREEXISTING_NODE_MODULES_VERSION INSTALLED_PACKAGE_VERSION INSTALLED_PACKAGE_COMMIT PACKAGE_MANAGER LOCKFILE LOCKFILE_TRACKED LOCKFILE_VALIDATION PRECHECK SUPPORTED_CONSUMER LEGACY_CONSUMER MIGRATION_REQUIRED MIGRATION_ELIGIBLE COMPATIBILITY_REASON LEGACY_STRATEGY DASHBOARD_LOCALS_VARIANT DIRTY_TARGET_PATHS DIRTY_NON_TARGET_PATHS DIRTY_POLICY_RESULT BACKUP_DIR BACKUP_MANIFEST ROLLBACK_AVAILABLE ROLLBACK_RESULT SOURCE_ROLLBACK_RESULT LOCKFILE_ROLLBACK_RESULT CREATED_FILES_ROLLBACK_RESULT NODE_MODULES_ROLLBACK_RESULT OVERALL_ROLLBACK_RESULT NODE_MODULES_ORIGINAL_STATE MIGRATION_PLAN MIGRATION_RESULT INSTALL_RESULT PACKAGE_VERIFY TARGETED_PACKAGE_TESTS TARGETED_CONSUMER_TESTS PRODUCTION_LIKE_RENDER NO_DUPLICATE_RENDER IDEMPOTENCY_TEST PROTECTED_PATHS PROTECTED_PATHS_PRESERVED WEB_PM2_PROCESS WEB_RESTARTED CRON_PM2_PROCESSES CRON_RESTARTED HEALTH_TARGET HEALTH_CHECK FINAL_RESULT; do eval "v=\${$key}"; printf '%s=%s\n' "$key" "$(clean "$v")"; done; }
 rollback() {
   [ "$MUTATED" -eq 1 ] || return 0
   SOURCE_ROLLBACK_RESULT=PASS; LOCKFILE_ROLLBACK_RESULT=PASS; CREATED_FILES_ROLLBACK_RESULT=PASS; NODE_MODULES_ROLLBACK_RESULT=PASS
@@ -49,6 +50,12 @@ while [ "$#" -gt 0 ]; do case "$1" in
 trap 'c=$?; if [ $c -ne 0 ] && [ "$FINAL_RESULT" = FAIL ]; then FINAL_RESULT=UNEXPECTED_ERROR; rollback; summary; fi' EXIT
 cd "$APP_DIR" || fail APP_DIR_UNREADABLE
 [[ "$PACKAGE_SHA" =~ ^[0-9a-fA-F]{40}$ ]] || fail PACKAGE_SHA_MUST_BE_EXACT_40_HEX
+REQUESTED_PACKAGE_SHA="$PACKAGE_SHA"
+if [ -n "${AFFILIATE_INSTALLER_PACKAGE_METADATA_JSON:-}" ]; then package_metadata="$AFFILIATE_INSTALLER_PACKAGE_METADATA_JSON"; else package_metadata="$(curl -fsSL "https://raw.githubusercontent.com/letuanthhcm/affiliate-dashboard-integrations/$PACKAGE_SHA/package.json" 2>/dev/null)" || fail REQUESTED_PACKAGE_METADATA_UNREADABLE; fi
+REQUESTED_PACKAGE_VERSION="$(printf '%s' "$package_metadata" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{process.stdout.write(String(JSON.parse(s).version||''))}catch(_){process.exit(1)}})" 2>/dev/null)" || fail REQUESTED_PACKAGE_METADATA_UNREADABLE
+[ -n "$REQUESTED_PACKAGE_VERSION" ] || fail REQUESTED_PACKAGE_METADATA_UNREADABLE
+PACKAGE_VERSION="$REQUESTED_PACKAGE_VERSION"
+[ ! -f "node_modules/$PACKAGE_NAME/package.json" ] || PREEXISTING_NODE_MODULES_VERSION="$(node -p "require('./node_modules/$PACKAGE_NAME/package.json').version" 2>/dev/null || printf UNREADABLE)"
 
 if [ "$(git rev-parse --is-inside-work-tree 2>/dev/null || true)" = true ]; then IS_GIT_WORKTREE=YES; else fail NOT_A_GIT_WORKTREE; fi
 GIT_TOPLEVEL="$(git rev-parse --show-toplevel 2>/dev/null)" || fail GIT_TOPLEVEL_UNREADABLE
@@ -73,13 +80,28 @@ if [ "$LEGACY_CONSUMER" = YES ]; then
   required='modules/app/helpers/setAppRoutes.js modules/dashboard/controllers/dashboard.admin.js themes/admin/dashboard/dashboard-admin.pug'
   for f in $required; do [ -e "$f" ] || { COMPATIBILITY_REASON="MISSING_ANCHOR:$f"; fail UNSUPPORTED_LEGACY_CONSUMER; }; done
   grep -Eq 'setAppRoutes[[:space:]]*\([[:space:]]*app[[:space:]]*\)' server.js || { COMPATIBILITY_REASON=SERVER_ROUTE_REGISTRATION_UNSUPPORTED; fail UNSUPPORTED_LEGACY_CONSUMER; }
-  COMPATIBILITY_REASON="$(node <<'NODE'
+  compatibility="$(node <<'NODE'
 const fs = require('fs');
 const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
 const routes = fs.readFileSync('modules/app/helpers/setAppRoutes.js', 'utf8');
 const dashboard = fs.readFileSync('modules/dashboard/controllers/dashboard.admin.js', 'utf8');
 const theme = fs.readFileSync('themes/admin/dashboard/dashboard-admin.pug', 'utf8');
 let reason = '';
+function extractFunction(source, name) {
+  const signature = new RegExp(`async\\s+function\\s+${name}\\s*\\(\\s*req\\s*,\\s*res\\s*\\)\\s*\\{`, 'g');
+  const matches = Array.from(source.matchAll(signature)); if (matches.length !== 1) return null;
+  const start = matches[0].index; const open = source.indexOf('{', start); let depth=0, quote='', escaped=false, line=false, block=false;
+  for (let i=open;i<source.length;i+=1) { const c=source[i],n=source[i+1]; if(line){if(c==='\n')line=false;continue} if(block){if(c==='*'&&n==='/'){block=false;i+=1}continue} if(quote){if(escaped)escaped=false;else if(c==='\\')escaped=true;else if(c===quote)quote='';continue} if(c==='/'&&n==='/'){line=true;i+=1;continue} if(c==='/'&&n==='*'){block=true;i+=1;continue} if(c==="'"||c==='"'||c==='`'){quote=c;continue} if(c==='{')depth+=1; if(c==='}'&&--depth===0)return source.slice(start,i+1); }
+  return null;
+}
+function dashboardVariant(source) {
+  const fn=extractFunction(source,'DashboardAdmin'); if(!fn||!/\bgetDashboardHome\s*\(/.test(fn)||!/\bactiveSection\b/.test(fn)||!/\bcontext\s*:\s*\{[\s\S]*?\bdashboard\b/.test(fn)||!/\bbreadcrumb\s*:/.test(fn))return '';
+  const alias=/const\s*\{\s*locals\s*\}\s*=\s*res\s*;/.test(fn)||/const\s+locals\s*=\s*res\.locals\s*;/.test(fn); const variant=alias?'LOCALS_ALIAS':'DIRECT_RES_LOCALS'; const target=alias?'locals':'res\\.locals';
+  if((fn.match(new RegExp(`Object\\.assign\\(\\s*${target}\\s*,`,'g'))||[]).length!==1)return '';
+  if((fn.match(new RegExp(`return\\s+res\\.render\\(\\s*(['"])admin\\/dashboard\\/dashboard-admin\\1\\s*,\\s*${target}\\s*\\)\\s*;?`,'g'))||[]).length!==1)return '';
+  return variant;
+}
+let variant='';
 if (!pkg.scripts || typeof pkg.scripts.start !== 'string') reason = 'PACKAGE_SCRIPTS_NOT_DETERMINISTIC';
 else if (!/module\.exports\s*=\s*[A-Za-z_$][\w$]*/.test(routes)) reason = 'SET_APP_ROUTES_NOT_CALLABLE';
 else if (/registerAffiliateCmsDashboardIntegrations/.test(routes) && !routes.includes("require('@robus/affiliate-dashboard-integrations')")) reason = 'CONFLICTING_ANALYTICS_REGISTRATION';
@@ -87,26 +109,23 @@ else if (/\/api\/google|google\/overview/.test(routes) && !/registerAffiliateCms
 else if (!/^(?:const|let|var)\s+/m.test(routes)) reason = 'SET_APP_ROUTES_IMPORT_ANCHOR_UNSUPPORTED';
 else if (!/\n\s*\/\/\s*(catch files|load modules)/i.test(routes)) reason = 'SET_APP_ROUTES_REGISTRATION_ANCHOR_UNSUPPORTED';
 else if (!/^(?:const|let|var)\s+/m.test(dashboard)) reason = 'DASHBOARD_IMPORT_ANCHOR_UNSUPPORTED';
-else {
-  const homes = dashboard.match(/async\s+function\s+AdminHome\s*\([^)]*\)\s*\{[\s\S]*?\n\}/g) || [];
-  if (homes.length !== 1) reason = 'DASHBOARD_CONTROLLER_UNSUPPORTED';
-  else if ((homes[0].match(/return\s+res\.render\(\s*(['"])admin\/dashboard\/dashboard-admin\1\s*,\s*locals\s*\)\s*;?/g) || []).length !== 1) reason = 'DASHBOARD_RENDER_CALL_UNSUPPORTED';
-  else if (!/const\s*\{\s*locals\s*\}\s*=\s*res\s*;/.test(homes[0]) || !/Object\.assign\(\s*locals\s*,/.test(homes[0])) reason = 'DASHBOARD_LOCALS_UNSUPPORTED';
-  else if ((dashboard.match(/admin\/dashboard\/dashboard-admin/g) || []).length !== 1) reason = 'DASHBOARD_RENDER_AMBIGUOUS';
-  else if (!/^extends\s+\.\.\//m.test(theme) || (theme.match(/^block\s+content\s*$/gm) || []).length !== 1) reason = 'DASHBOARD_TEMPLATE_ANCHOR_UNSUPPORTED';
-  else if ((routes.match(/\/modules\/\*\*\/\*\.routes\.js/g) || []).length !== 1 || (routes.match(/\/\/\s*load modules/g) || []).length !== 1) reason = 'SET_APP_ROUTES_REGISTRATION_ANCHOR_UNSUPPORTED';
-}
+else if (!(variant=dashboardVariant(dashboard))) reason = 'DASHBOARD_CONTROLLER_UNSUPPORTED';
+else if (!/^extends\s+\.\.\//m.test(theme) || (theme.match(/^block\s+content\s*$/gm) || []).length !== 1) reason = 'DASHBOARD_TEMPLATE_ANCHOR_UNSUPPORTED';
+else if ((routes.match(/\/modules\/\*\*\/\*\.routes\.js/g) || []).length !== 1 || (routes.match(/\/\/\s*load modules/g) || []).length !== 1) reason = 'SET_APP_ROUTES_REGISTRATION_ANCHOR_UNSUPPORTED';
 if (reason) { process.stdout.write(reason); process.exitCode = 2; }
-else process.stdout.write('ELIGIBLE_LEGACY_AFFILIATECMS');
+else process.stdout.write(`ELIGIBLE_LEGACY_AFFILIATECMS|${variant}`);
 NODE
-)" || { MIGRATION_ELIGIBLE=NO; fail UNSUPPORTED_LEGACY_CONSUMER; }
-  MIGRATION_ELIGIBLE=YES; COMPATIBILITY_REASON=ELIGIBLE_LEGACY_AFFILIATECMS; LEGACY_STRATEGY=AFFILIATECMS_V223_DASHBOARD_RENDER
+)" || { COMPATIBILITY_REASON="$compatibility"; MIGRATION_ELIGIBLE=NO; fail UNSUPPORTED_LEGACY_CONSUMER; }
+  COMPATIBILITY_REASON="${compatibility%%|*}"; DASHBOARD_LOCALS_VARIANT="${compatibility#*|}"
+  MIGRATION_ELIGIBLE=YES; LEGACY_STRATEGY=AFFILIATECMS_V223_DASHBOARD_RENDER
 fi
 
 current_sha="$(printf '%s' "$dep" | sed -n 's/.*#\([0-9a-fA-F]\{40\}\)$/\1/p')"
 if [ "$SUPPORTED_CONSUMER" = YES ] && [ "$current_sha" = "$PACKAGE_SHA" ] && [ -f "node_modules/$PACKAGE_NAME/package.json" ]; then
+  node "node_modules/$PACKAGE_NAME/bin/verify.js" --expected-commit "$PACKAGE_SHA" || fail PACKAGE_VERIFY_FAILED; PACKAGE_VERIFY=PASS
   DIRTY_POLICY_RESULT=PASS; MIGRATION_RESULT=NOT_REQUIRED; INSTALLER_STATUS=PASS; FINAL_RESULT=ALREADY_INSTALLED; INSTALL_RESULT=ALREADY_INSTALLED; IDEMPOTENCY_TEST=PASS
   PACKAGE_VERSION="$(node -p "require('./node_modules/$PACKAGE_NAME/package.json').version")"
+  INSTALLED_PACKAGE_VERSION="$PACKAGE_VERSION"; INSTALLED_PACKAGE_COMMIT="$PACKAGE_SHA"
   summary; trap - EXIT; exit 0
 fi
 
@@ -127,9 +146,9 @@ for f in $TARGETS; do if [ -f "$f" ]; then b="$BACKUP_DIR/files/$(printf '%s' "$
 if [ -d "node_modules/$PACKAGE_NAME" ]; then NODE_MODULES_ORIGINAL_STATE=PRESENT; cp -a "node_modules/$PACKAGE_NAME" "$BACKUP_DIR/node-module" || fail BACKUP_FAILED; else NODE_MODULES_ORIGINAL_STATE=ABSENT; fi
 ROLLBACK_AVAILABLE=YES; MUTATED=1; spec="git+$PACKAGE_REPO#$PACKAGE_SHA"
 if [ "$PACKAGE_MANAGER" = YARN ]; then yarn add --exact --ignore-scripts "$PACKAGE_NAME@$spec" || fail LOCKFILE_RESOLUTION_FAILED; yarn install --frozen-lockfile || fail DETERMINISTIC_INSTALL_FAILED; else npm install --package-lock-only --save-exact "$PACKAGE_NAME@$spec" || fail LOCKFILE_RESOLUTION_FAILED; npm ci || fail DETERMINISTIC_INSTALL_FAILED; fi
-INSTALL_RESULT=PASS; PACKAGE_VERSION="$(node -p "require('./node_modules/$PACKAGE_NAME/package.json').version")"
+INSTALL_RESULT=PASS; PACKAGE_VERSION="$(node -p "require('./node_modules/$PACKAGE_NAME/package.json').version")"; INSTALLED_PACKAGE_VERSION="$PACKAGE_VERSION"
 if [ "$LEGACY_CONSUMER" = YES ]; then out="$(PACKAGE_SHA="$PACKAGE_SHA" AFFILIATECMS_APP_DIR="$APP_DIR" node "node_modules/$PACKAGE_NAME/bin/migrate-affiliatecms-consumer.js")" || fail MIGRATION_APPLY_FAILED; MIGRATION_PLAN="$(printf '%s\n' "$out" | sed -n 's/^MIGRATION_PLAN=//p')"; MIGRATION_RESULT=PASS; fi
-node "node_modules/$PACKAGE_NAME/bin/verify.js" --expected-commit "$PACKAGE_SHA" || fail PACKAGE_VERIFY_FAILED; PACKAGE_VERIFY=PASS
+node "node_modules/$PACKAGE_NAME/bin/verify.js" --expected-commit "$PACKAGE_SHA" || fail PACKAGE_VERIFY_FAILED; PACKAGE_VERIFY=PASS; INSTALLED_PACKAGE_COMMIT="$PACKAGE_SHA"
 node "node_modules/$PACKAGE_NAME/test/syntax-check.test.js" && node "node_modules/$PACKAGE_NAME/test/package-smoke.test.js" || fail TARGETED_PACKAGE_TESTS_FAILED; TARGETED_PACKAGE_TESTS=PASS
 node -e "const s=require('fs').readFileSync('modules/app/helpers/setAppRoutes.js','utf8');if((s.match(/registerAffiliateCmsDashboardIntegrations/g)||[]).length!==2)process.exit(1)" || fail DUPLICATE_REGISTRATION; NO_DUPLICATE_RENDER=PASS
 PROTECTED_PATHS_PRESERVED=PASS; TARGETED_CONSUMER_TESTS=PASS; PRODUCTION_LIKE_RENDER=PASS
