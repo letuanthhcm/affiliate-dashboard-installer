@@ -51,7 +51,14 @@ trap 'c=$?; if [ $c -ne 0 ] && [ "$FINAL_RESULT" = FAIL ]; then FINAL_RESULT=UNE
 cd "$APP_DIR" || fail APP_DIR_UNREADABLE
 [[ "$PACKAGE_SHA" =~ ^[0-9a-fA-F]{40}$ ]] || fail PACKAGE_SHA_MUST_BE_EXACT_40_HEX
 REQUESTED_PACKAGE_SHA="$PACKAGE_SHA"
-if [ -n "${AFFILIATE_INSTALLER_PACKAGE_METADATA_JSON:-}" ]; then package_metadata="$AFFILIATE_INSTALLER_PACKAGE_METADATA_JSON"; else package_metadata="$(curl -fsSL "https://raw.githubusercontent.com/letuanthhcm/affiliate-dashboard-integrations/$PACKAGE_SHA/package.json" 2>/dev/null)" || fail REQUESTED_PACKAGE_METADATA_UNREADABLE; fi
+if [ -n "${AFFILIATE_INSTALLER_PACKAGE_METADATA_JSON:-}" ]; then
+  package_metadata="$AFFILIATE_INSTALLER_PACKAGE_METADATA_JSON"
+else
+  metadata_tmp="$(mktemp -d)" || fail REQUESTED_PACKAGE_METADATA_UNREADABLE
+  git clone -q --bare --filter=blob:none "$PACKAGE_REPO" "$metadata_tmp/repo" >/dev/null 2>&1 || { rm -rf "$metadata_tmp"; fail REQUESTED_PACKAGE_METADATA_UNREADABLE; }
+  package_metadata="$(git -C "$metadata_tmp/repo" show "$PACKAGE_SHA:package.json" 2>/dev/null)" || { rm -rf "$metadata_tmp"; fail REQUESTED_PACKAGE_METADATA_UNREADABLE; }
+  rm -rf "$metadata_tmp"
+fi
 REQUESTED_PACKAGE_VERSION="$(printf '%s' "$package_metadata" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{process.stdout.write(String(JSON.parse(s).version||''))}catch(_){process.exit(1)}})" 2>/dev/null)" || fail REQUESTED_PACKAGE_METADATA_UNREADABLE
 [ -n "$REQUESTED_PACKAGE_VERSION" ] || fail REQUESTED_PACKAGE_METADATA_UNREADABLE
 PACKAGE_VERSION="$REQUESTED_PACKAGE_VERSION"
